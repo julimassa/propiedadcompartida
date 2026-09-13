@@ -1,5 +1,6 @@
 import { ref, push, set, get, update, remove } from "firebase/database";
 import { auth, db } from "./firebase";
+import { ROLES, normalizePropertyRole } from "../constants/roles";
 
 // =========================
 // PROPIEDADES
@@ -23,7 +24,7 @@ export async function createProperty(propertyData) {
   await set(newPropRef, propertyToSave);
 
   await set(ref(db, `memberships/${propertyId}/${user.uid}`), {
-    role: "admin",
+    role: ROLES.ADMIN,
     since: Date.now(),
   });
 
@@ -94,8 +95,8 @@ export async function getMyRoleInProperty(propertyId) {
   if (!propertyId) throw new Error("Falta propertyId.");
 
   const snap = await get(ref(db, `memberships/${propertyId}/${user.uid}`));
-  if (!snap.exists()) return "participant";
-  return snap.val()?.role ?? "participant";
+  if (!snap.exists()) return null;
+  return normalizePropertyRole(snap.val()?.role);
 }
 
 // =========================

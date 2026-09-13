@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { View, Text, TextInput, Pressable, Alert, ScrollView } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { ROLES } from "../constants/roles";
 import {
   getPropertyServices,
   updatePropertyServices,
@@ -140,45 +141,41 @@ async function saveServicesCache(propertyId, services) {
 export default function ServicesScreen({ route, navigation }) {
   const propertyId = route?.params?.propertyId;
 
-  // ✅ Bonus mini: evita crashes si no viene propertyId
-  if (!propertyId) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
-        <Text style={{ fontWeight: "800", fontSize: 16 }}>Error</Text>
-        <Text style={{ opacity: 0.7, marginTop: 8, textAlign: "center" }}>
-          Falta propertyId para cargar los servicios.
-        </Text>
-      </View>
-    );
-  }
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [role, setRole] = useState("participant");
-  const isAdmin = useMemo(() => role === "admin", [role]);
+  const [accessError, setAccessError] = useState(false);
+  const [role, setRole] = useState(null);
+  const isAdmin = useMemo(() => role === ROLES.ADMIN, [role]);
 
   const [services, setServices] = useState(makeBaseServices());
 
   const [comment, setComment] = useState("");
   const [comments, setComments] = useState([]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isActive) => {
     try {
       setLoading(true);
 
-      // ✅ 1) Cache local primero (instantáneo)
-      const cachedServices = await loadServicesCache(propertyId);
-      if (cachedServices) {
-        setServices((prev) => mergeServices(prev, cachedServices));
-      }
-
-      // ✅ 2) Rol
+      setRole(null);
+      setAccessError(false);
+      setServices(makeBaseServices());
+      setComments([]);
+      setComment("");
+      if (!propertyId) return;
       const myRole = await getMyRoleInProperty(propertyId);
+      if (!isActive()) return;
       setRole(myRole);
+      if (myRole === null) return;
+
+      // Leer caché y datos solo después de comprobar la membresía.
+      const cachedServices = await loadServicesCache(propertyId);
+      if (!isActive()) return;
+      if (cachedServices) setServices((prev) => mergeServices(prev, cachedServices));
 
       // ✅ 3) Backend
       const data = await getPropertyServices(propertyId);
+      if (!isActive()) return;
       if (data) {
         setServices((prev) => {
           const merged = mergeServices(prev, data);
@@ -190,17 +187,23 @@ export default function ServicesScreen({ route, navigation }) {
 
       // ✅ 4) Comentarios
       const comm = await getServiceComments(propertyId);
+      if (!isActive()) return;
       setComments(comm);
     } catch (e) {
-      Alert.alert("Error", e.message);
+      if (isActive()) {
+        setRole(null);
+        setAccessError(true);
+      }
     } finally {
-      setLoading(false);
+      if (isActive()) setLoading(false);
     }
   }, [propertyId]);
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      let active = true;
+      load(() => active);
+      return () => { active = false; };
     }, [load])
   );
 
@@ -219,6 +222,7 @@ export default function ServicesScreen({ route, navigation }) {
   }
 
   async function handleSave() {
+    if (loading || accessError || role === null) return;
     if (!isAdmin) {
       Alert.alert(
         "Solo lectura",
@@ -247,6 +251,7 @@ export default function ServicesScreen({ route, navigation }) {
   }
 
   async function handleSendComment() {
+    if (loading || accessError || role === null) return;
     try {
       if (!comment.trim()) {
         Alert.alert("Falta comentario", "Escribí una observación.");
@@ -266,6 +271,22 @@ export default function ServicesScreen({ route, navigation }) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
         <Text>Cargando servicios...</Text>
+      </View>
+    );
+  }
+
+  if (accessError || role === null) {
+    return (
+      <View style={{ flex: 1, padding: 16, justifyContent: "center", gap: 12 }}>
+        <Text>{!propertyId
+          ? "Falta identificar la propiedad."
+          : accessError
+          ? "No pudimos comprobar tu acceso o cargar los servicios. Volvé a intentarlo."
+          : "No tenés acceso a esta propiedad."}</Text>
+        <Pressable accessibilityRole="button" onPress={() => navigation.navigate("PropertySelect")}
+          style={{ padding: 14, alignItems: "center", borderWidth: 1, borderRadius: 10 }}>
+          <Text>Volver a mis propiedades</Text>
+        </Pressable>
       </View>
     );
   }
